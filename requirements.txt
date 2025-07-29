@@ -1,0 +1,4 @@
+streamlit
+camelot-py[cv] # or camelot-py[all] if [cv] doesn't work
+pandas
+openpyxl
