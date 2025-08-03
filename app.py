@@ -6,7 +6,6 @@ import os
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-from openpyxl.worksheet.cell_range import CellRange
 
 # --- Helper Functions and Data ---
 
@@ -42,7 +41,7 @@ UNIT_CONVERSIONS = {
 def convert_unit_to_number(unit_string):
     """
     Converts a unit string to a numerical value based on predefined mappings.
-    Prioritizes specific percentage logic if '%', '%0', or '%o' are present,
+    Prioritizes specific percentage logic if '%', '%0', '%o', '% 0', or '% o' are present,
     otherwise uses the UNIT_CONVERSIONS dictionary.
     """
     if not isinstance(unit_string, str):
@@ -50,8 +49,9 @@ def convert_unit_to_number(unit_string):
 
     unit_string_cleaned = unit_string.strip().lower()
 
-    # Specific logic for percentage units from the original code
-    if "%0" in unit_string_cleaned or "%o" in unit_string_cleaned:
+    # Specific logic for percentage units for 1000.0
+    # Added '% 0' and '% o' to this condition
+    if "%0" in unit_string_cleaned or "%o" in unit_string_cleaned or "% 0" in unit_string_cleaned or "% o" in unit_string_cleaned:
         return 1000.0
     elif "%" in unit_string_cleaned:
         return 100.0
@@ -170,14 +170,26 @@ st.title("📄 PDF Table Extractor & Editor")
 st.markdown("""
 Upload a PDF file to extract, edit, and consolidate tables. Calculated columns will update automatically.
 
-*Important:* This app uses the 'lattice' extraction method with a fixed line scale of 50.
+Important: This app uses the 'lattice' extraction method with a fixed line scale of 50.
 """)
+
+# --- SESSION STATE INITIALIZATION ---
+final_display_excel_column_order = [
+    "Sr No.", "Items Description", "Units", "Units No.", "Quantity",
+    "Govt Rate - Input", "Govt Rate - Total", "Quoted Rate - Input", "Quoted Rate - Total"
+]
+
+if 'extraction_success' not in st.session_state:
+    st.session_state.extraction_success = False
+
+if 'single_combined_df' not in st.session_state:
+    st.session_state.single_combined_df = pd.DataFrame(columns=final_display_excel_column_order)
 
 # --- PDF Upload and Extraction Settings ---
 uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"], key="pdf_uploader")
 
 pages_input = st.text_input(
-    "Enter pages to extract (e.g., '1,3-5,8'). Leave blank for all pages with tables.",
+    "Enter pages to extract (e.g., '1,3-5'). Leave blank for all pages with tables.",
     value="",
     key="pages_input"
 )
@@ -191,7 +203,7 @@ extract_button = st.button("Extract Tables for Editing", key="extract_button")
 # --- Define PDF Column Mapping Rules ---
 pdf_column_mapping_rules = {
     "Sr No.": {"keywords": ["sr.no", "sr no.", "sr no", "seriel number", "srno", "s.no", "serial no", "serial number",
-                            "sr. no.", "sr.", "no."], "include_header_cell_in_data": False},
+                             "sr. no.", "sr.", "no."], "include_header_cell_in_data": False},
     "Items Description": {
         "keywords": ["items", "item description", "items description", "item name", "items name", "item", "description",
                      "item desc"], "include_header_cell_in_data": False},
@@ -205,15 +217,6 @@ pdf_column_mapping_rules = {
     "Quoted Rate - Input": {"keywords": ["quoted rate", "quote rate", "quoted rates"],
                             "include_header_cell_in_data": False},
 }
-
-# --- Fixed Final Column Order for Editor and Excel (Quoted Rate Calculation) ---
-base_columns = ["Sr No.", "Items Description", "Units", "Units No.", "Quantity"]
-final_display_excel_column_order = base_columns + [
-    "Govt Rate - Input",
-    "Govt Rate - Total",
-    "Quoted Rate - Input",
-    "Quoted Rate - Total"
-]
 
 # --- Main Extraction and Display Logic ---
 if extract_button:
@@ -361,8 +364,8 @@ if 'extraction_success' in st.session_state and st.session_state.extraction_succ
                                                            help="Calculated from Govt Rate - Input * Quantity / Units No.",
                                                            format="%.2f", disabled=True),
         "Quoted Rate - Total": st.column_config.NumberColumn("Quoted Rate - Total",
-                                                             help="Calculated from Quoted Rate - Input * Quantity / Units No.",
-                                                             format="%.2f", disabled=True),
+                                                              help="Calculated from Quoted Rate - Input * Quantity / Units No.",
+                                                              format="%.2f", disabled=True),
 
         "Units": st.column_config.TextColumn("Units", help="Enter unit (e.g., 'P-no/P Hour'). Affects 'Units No.'.",
                                              width="small"),
@@ -370,22 +373,19 @@ if 'extraction_success' in st.session_state and st.session_state.extraction_succ
         "Govt Rate - Input": st.column_config.NumberColumn("Govt Rate - Input", help="Enter the government input rate.",
                                                            format="%.2f"),
         "Quoted Rate - Input": st.column_config.NumberColumn("Quoted Rate - Input",
-                                                             help="Enter the quoted input rate (for comparison).",
-                                                             format="%.2f"),
+                                                              help="Enter the quoted input rate (for comparison).",
+                                                              format="%.2f"),
 
         "Sr No.": st.column_config.TextColumn("Sr No.", disabled=True),
         "Items Description": st.column_config.TextColumn("Items Description", disabled=True, width="large"),
     }
 
     active_column_config = {}
-    editable_cols = ["Units", "Units No.", "Quantity", "Govt Rate - Input", "Quoted Rate - Input"]
 
     for col_name in final_display_excel_column_order:
         if col_name in df_for_editor.columns:
             if col_name in column_config_dict:
                 active_column_config[col_name] = column_config_dict[col_name]
-            elif col_name in editable_cols:
-                active_column_config[col_name] = st.column_config.TextColumn(label=col_name, disabled=False)
             else:
                 active_column_config[col_name] = st.column_config.TextColumn(label=col_name, disabled=True)
 
@@ -397,8 +397,8 @@ if 'extraction_success' in st.session_state and st.session_state.extraction_succ
         column_config=active_column_config
     )
 
+    # Corrected Logic: Perform the recalculation directly on the editor's output
     recalculated_combined_df = recalculate_editor_df_values(edited_df_from_widget)
-
     st.session_state.single_combined_df = recalculated_combined_df
 
     st.markdown("---")
@@ -407,7 +407,7 @@ if 'extraction_success' in st.session_state and st.session_state.extraction_succ
         combined_final_df = st.session_state.single_combined_df
 
         st.subheader("Summary")
-        st.write(f"**Name:** {name_input}")
+        st.write(f"*Name:* {name_input}")
 
         total_govt_rate_sum = combined_final_df[
             "Govt Rate - Total"].sum() if "Govt Rate - Total" in combined_final_df.columns else 0
@@ -520,8 +520,8 @@ if 'extraction_success' in st.session_state and st.session_state.extraction_succ
                 row_num_for_govt_grand_total = ws.max_row
 
                 grand_total_formula_cell_govt = ws.cell(row=row_num_for_govt_grand_total,
-                                                        column=final_display_excel_column_order.index(
-                                                            govt_total_col_name) + 1)
+                                                         column=final_display_excel_column_order.index(
+                                                             govt_total_col_name) + 1)
                 grand_total_formula_cell_govt.value = f"=SUM({govt_total_col_letter}{start_row_for_sum}:{govt_total_col_letter}{end_row_for_sum})"
                 for cell in ws[row_num_for_govt_grand_total]:
                     cell.font = Font(bold=True)
@@ -541,8 +541,8 @@ if 'extraction_success' in st.session_state and st.session_state.extraction_succ
                 row_num_for_quoted_grand_total = ws.max_row
 
                 grand_total_formula_cell_quoted = ws.cell(row=row_num_for_quoted_grand_total,
-                                                          column=final_display_excel_column_order.index(
-                                                              quoted_total_col_name) + 1)
+                                                           column=final_display_excel_column_order.index(
+                                                               quoted_total_col_name) + 1)
                 grand_total_formula_cell_quoted.value = f"=SUM({quoted_total_col_letter}{start_row_for_sum}:{quoted_total_col_letter}{end_row_for_sum})"
                 for cell in ws[row_num_for_quoted_grand_total]:
                     cell.font = Font(bold=True)
@@ -562,7 +562,7 @@ if 'extraction_success' in st.session_state and st.session_state.extraction_succ
             ws[f'{govt_rate_total_col_letter}1'].alignment = Alignment(horizontal='right')
             ws[f'{govt_rate_total_col_letter}1'].border = thin_border
             ws[f'{govt_rate_total_col_letter}1'].fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC",
-                                                                    fill_type="solid")
+                                                                     fill_type="solid")
 
             formula_cell_loc = f'{quoted_rate_total_col_letter}1'
             formula_summary_str = (
